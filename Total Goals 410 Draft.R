@@ -4,15 +4,18 @@ install.packages("stringr")
 install.packages('purrr')
 install.packages('ggplot2')
 install.packages('caret')
+install.packages('lmtest')
 
-library(caret)
 library(purrr)
 library(stringr)
 library(lubridate)
 library(dplyr)
 library(gdata)
 library(ggplot2)
-
+library(caret)
+library(glmnet)
+library(lmtest)
+library(car)
 
 # Set the file path to your CSV file
 game_path <- "~/Desktop/archive/understat_per_game.csv"
@@ -264,17 +267,23 @@ totals <- data.frame(total = regressors$FTHG + regressors$FTAG)
 regressors <- select(regressors, 3:ncol(regressors))
 
 
-
 # Run the model
 model <- lm(totals$total ~ BbAv.2.5 + npxGA_home + deep_home + allowed_home + 
               xG_away + npxG_away + scored_away + ppda_att_away + S_home + 
               ST_home + Y_home + F_away + R_away, data = regressors)
 summary(model)
 
+model_no_outliers <- lm(totals$total ~ BbAv.2.5 + npxGA_home + deep_home + allowed_home + 
+              xG_away + scored_away + ppda_att_away + S_home + 
+              Y_home + F_away + R_away, data = regressors)
+summary(model_no_outliers)
+
+# the testing regressors
 new_regressors <- select(test_df, 5:ncol(test_df))
 new_regressors <- sapply(new_regressors, as.numeric)
 new_regressors <- as.data.frame(new_regressors)
 
+# the testing totals
 new_totals <- data.frame(total = new_regressors$FTHG + new_regressors$FTAG)
 new_regressors <- select(new_regressors, 3:ncol(new_regressors))
 
@@ -283,7 +292,8 @@ predictions <- predict(model, newdata = new_regressors)
 new_totals$predicted <- predictions
 
 ## Find if the bet would have won simply
-new_totals$win <- ifelse((new_totals$total > 2.5 & new_totals$predicted > 2.5),  "Win", ifelse(new_totals$total < 2.5 & new_totals$predicted < 2.5, "Win", "Loss"))
+new_totals$win <- ifelse(new_totals$total > 2.5 & new_totals$predicted > 2.5, "Win", 
+                          ifelse(new_totals$total < 2.5 & new_totals$predicted < 2.5, "Win", "Loss"))
 ## Counts the wins and losses
 table(new_totals$win)
 ## Use z-score to make predictions
@@ -339,6 +349,7 @@ forwardAIC <- step(mint,scope=list(lower=~1,
                    direction="forward", data=regressors)
 
 
+
 ## Backward AIC
 m1 <- lm(totals$total ~ BbAv.2.5 + BbAv.2.5.1 + xG_home + xGA_home + npxG_home + npxGA_home + 
            deep_home + deep_allowed_home + scored_home + allowed_home + 
@@ -355,8 +366,7 @@ m1 <- lm(totals$total ~ BbAv.2.5 + BbAv.2.5.1 + xG_home + xGA_home + npxG_home +
 backAIC <- step(m1,direction="backward", data=regressors)
 
 
-install.packages('glmnet')
-library(glmnet)
+#### Addressing Multicolinearity
 
 ## Ridge
 x <- model.matrix(totals$total ~ ., data = regressors)
@@ -365,23 +375,17 @@ ridge_model <- cv.glmnet(x, y, alpha = 0.5)
 
 coef(ridge_model, s = "lambda.min")
 
-
-
-## Other tests for linear regression models
-
-install.packages('lmtest')
-library(lmtest)
-library(car)
-
+## Autocorrelation
 dw <- dwtest(model)
 dw$statistic ## no autocorrelation as value = 2
 
+## Leverage
 cooksd <- cooks.distance(model)
 plot(cooksd, pch = 20, main = "Cook's distance plot")
 abline(h = 4/length(totals$total), col = "red")
 
+## Variance Inflation Factors
 vif(model)
-alias(model)
-
+vif(model_no_outliers)
 
 #########################################
